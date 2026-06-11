@@ -30,16 +30,31 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 def get_sheets_service():
-    # 自動修復 Google 憑證中私鑰（Private Key）換行符號在 Render 會被歪曲的問題
-    fixed_credentials = GOOGLE_CREDENTIALS.replace('\\n', '\n')
-    creds_info = json.loads(fixed_credentials)
+    try:
+        # 1. 先修剪前後可能不小心複製到的空格或換行
+        raw_credentials = GOOGLE_CREDENTIALS.strip()
 
-    creds = Credentials.from_service_account_info(
-        creds_info,
-        scopes=['https://www.googleapis.com/auth/spreadsheets']
-    )
+        # 2. 針對壓縮過的 JSON 進行雙重容錯處理：
+        # 有些系統會把 \n 變成真正的換行，有些會變成雙反斜線 \\n，這裡一併修正
+        fixed_credentials = raw_credentials.replace('\\n', '\n')
 
-    return build('sheets', 'v4', credentials=creds)
+        # 3. 關鍵修正：加入 strict=False
+        # 這樣一來，就算 JSON 字串內含有無效的隱形控制字元（例如 char 158 錯誤），
+        # Python 的 json 模組也會強行忽略並成功解析！
+        creds_info = json.loads(fixed_credentials, strict=False)
+
+        creds = Credentials.from_service_account_info(
+            creds_info,
+            scopes=['https://www.googleapis.com/auth/spreadsheets']
+        )
+        return build('sheets', 'v4', credentials=creds)
+
+    except json.JSONDecodeError as json_err:
+        print(f"❌ JSON 格式依舊解析失敗，請檢查 Render 後台引號是否對齊: {json_err}")
+        raise
+    except Exception as e:
+        print(f"❌ 憑證載入或 Sheets 服務建立失敗: {e}")
+        raise
 
 
 def log_to_sheets(user_msg, bot_reply):
