@@ -1,10 +1,3 @@
-print("APP START")
-print("LINE_CHANNEL_SECRET =", bool(LINE_CHANNEL_SECRET))
-print("LINE_CHANNEL_ACCESS_TOKEN =", bool(LINE_CHANNEL_ACCESS_TOKEN))
-print("GEMINI_API_KEY =", bool(GEMINI_API_KEY))
-print("SPREADSHEET_ID =", bool(SPREADSHEET_ID))
-print("GOOGLE_CREDENTIALS =", bool(GOOGLE_CREDENTIALS))
-
 import os
 import json
 import datetime
