@@ -1,5 +1,10 @@
 import os
+import json
+import datetime
+
 from flask import Flask, request, abort
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -11,10 +16,56 @@ LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
+SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID')
+GOOGLE_CREDENTIALS = os.environ.get('GOOGLE_CREDENTIALS')
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+def get_sheets_service():
+    creds_info = json.loads(GOOGLE_CREDENTIALS)
+
+    creds = Credentials.from_service_account_info(
+        creds_info,
+        scopes=[
+            'https://www.googleapis.com/auth/spreadsheets'
+        ]
+    )
+
+    return build(
+        'sheets',
+        'v4',
+        credentials=creds
+    )
+
+
+def log_to_sheets(user_msg, bot_reply):
+    try:
+        service = get_sheets_service()
+
+        now = datetime.datetime.now().strftime(
+            '%Y-%m-%d %H:%M:%S'
+        )
+
+        values = [[
+            now,
+            user_msg,
+            bot_reply
+        ]]
+
+        service.spreadsheets().values().append(
+            spreadsheetId=SPREADSHEET_ID,
+            range='工作表1!A:C',
+            valueInputOption='RAW',
+            body={'values': values}
+        ).execute()
+
+        print("已寫入 Google Sheet")
+
+    except Exception as e:
+        print(f"Sheets error: {e}")
 
 @app.route("/webhook", methods=['POST'])
 def webhook():
@@ -82,6 +133,8 @@ def handle_message(event):
     # 情況 3：使用者直接打「使用說明」
     elif user_msg.strip() == "使用說明":
         reply = "🤖 歡迎使用 AI 筆記秘書！\n\n你可以直接傳送文字讓我幫你梳理邏輯，也可以使用以下專屬功能：\n\n👉 輸入「/摘要 加上你的長文章」：自動啟動結構化重點濃縮。\n👉 輸入「/待辦 加上你的雜事」：自動生成精美 To-Do List。"
+
+        log_to_sheets(user_msg, reply)
         
         line_bot_api.reply_message(
             event.reply_token,
@@ -104,11 +157,19 @@ def handle_message(event):
             model='gemini-2.5-flash',
             contents=final_prompt
         )
-        reply = response.text
+
+        reply = response.text if response.text else "AI 沒有回傳內容"
+
+        # 寫入 Google Sheet
+        log_to_sheets(user_msg, reply)
+
     except Exception as e:
         print(f'Gemini error: {e}')
         reply = f'錯誤：{str(e)}'
-        
+
+        # 錯誤也記錄
+        log_to_sheets(user_msg, reply)
+
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply)
